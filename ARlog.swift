@@ -39,7 +39,6 @@ public class ARlog {
     static public var sceneInterval:Double = 0.25 // interval for storing 3D scenes when continouslyLogScene is true
     static public var mapInterval:Double = 1.0 // interval for storing AR world maps / space maps
     static let fpsInterval:Double = 1.0 // frames per second, therefore interval is 1.0
-
     
     // Internal objects
     static var isEnabled = ARLOG_ENABLED
@@ -75,7 +74,7 @@ public class ARlog {
     static var fpsResetTime:Date = Date.init()
     static var frameCount = -1
     static var testResetTime:Date = Date.init()
-
+    
     // public static functions
     
     static func start(_ observing:ARSCNView, sessionName:String = "ARSCNView") {
@@ -127,6 +126,18 @@ public class ARlog {
         ARlog.session.logItems.append(LogItem(type: LogLevel.info.rawValue, title: "Screen recording stopped", data: (ARlog.sessionStart?.toString())!, assetPath: "screen.mp4"))
         ARlog.stopScreenRecording()
         ARlog.saveSession()
+        ARlog.upload()
+    }
+    
+    static func upload(){
+        // initialize uploader
+        let uploader = ARlogUpload()
+        // get params
+        let fileUrl: String = sessionFolder!.absoluteString
+        var seshname: String = (sessionFolder?.lastPathComponent)!
+        seshname = seshname.replacingOccurrences(of: " ", with: "--")
+        
+        uploader.upload(fileUrl, seshname)
     }
     
     static func info(_ str:String, title:String = "Info") {
