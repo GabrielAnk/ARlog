@@ -19,11 +19,11 @@ public class ARlogUpload{
     let doUpload = true                             // if this is true ARlog will try to upload
     let onlyWifi = false                            // if this is true it will only upload when wifi is available
     let largeOnlyWifi = false                       // if this is true large files will only be uploaded when wifi is connected
-    let serverURL = ""                              // URL of the server endpoint
+    let serverURL = "https://service.metason.net/arlog"                // URL of the server endpoint "http://<ip>:<port>"
     let projectID = ""                              // projectID of the AR project, where it is saved on the server
     
     
-    // functions
+    // upload functionality
     func upload(_ sessionFilesUrl: String,_ sessionName: String){
         var dynUpload = doUpload
                 
@@ -42,7 +42,7 @@ public class ARlogUpload{
         
         if (doUpload == true && dynUpload == true && isConnection() == true){
         
-            let sessionUrl = URL(string: serverURL + "/log/" + projectID + "/" + sessionName)
+            let uploadUrl = URL(string: serverURL + "/log/" + projectID + "/" + sessionName)
         
             let filePathString = sessionFilesUrl + sessionName + ".zip"
             let zipfileURL = URL(string: filePathString)
@@ -57,16 +57,13 @@ public class ARlogUpload{
             }
         
             if (isLargeFile(zipfileURL!) == false){
-//                AFuploader(zipfileURL!, sessionUrl!)
-                UrlUploader(zipfileURL!, sessionUrl!)
+                singleFileUploader(sessionFilesUrl, uploadUrl!)
             }
             else if (largeOnlyWifi == false){
-                //                AFuploader(zipfileURL!, sessionUrl!)
-                UrlUploader(zipfileURL!, sessionUrl!)
+                singleFileUploader(sessionFilesUrl, uploadUrl!)
             }
             else if (isLargeFile(zipfileURL!) == true && largeOnlyWifi == true && isWifi() == true){
-                //                AFuploader(zipfileURL!, sessionUrl!)
-                UrlUploader(zipfileURL!, sessionUrl!)
+                singleFileUploader(sessionFilesUrl, uploadUrl!)
             }
             else{
                 print("file is too large with no wifi ")
@@ -84,59 +81,113 @@ public class ARlogUpload{
         }
         
     }
-    
-    func UrlUploader(_ zipfileURL: URL,_ sessionUrl: URL){
-        var request = URLRequest(url: sessionUrl)
-        request.httpMethod = "POST"
-        let config = URLSessionConfiguration.background(withIdentifier: zipfileURL.lastPathComponent)
-        let session = URLSession(configuration: config)
-        print(request)
-        let task = session.uploadTask(with: request, fromFile: zipfileURL)
-        task.resume()
+
+    // uploads all the files belonging to a session
+    func singleFileUploader(_ sessionFilesUrl: String,_ uploadUrl: URL){
+        let sessionJsonFile = URL(string: sessionFilesUrl + "session.json")
+        let videoFile = URL(string: sessionFilesUrl + "screen.mp4")
+        let mapsFolder = URL(string: sessionFilesUrl + "maps/")
+        let scenesFolder = URL(string: sessionFilesUrl + "scenes/")
+        
+        // upload the session files in the session directory
+        fileUpload(sessionJsonFile!, uploadUrl, "session", "application/json", "session.json")
+        fileUpload(videoFile!, uploadUrl, "session", "video/mp4", "video.mp4")
+
+        
+        // loop through the folders of the session directory to upload each file
+        // https://stackoverflow.com/a/47761434
+        let fm = FileManager()
+        do {
+            if dirExists(scenesFolder!.path){
+            let fileURLs = try fm.contentsOfDirectory(at: scenesFolder!, includingPropertiesForKeys: nil)
+
+            for fileUrl in fileURLs{
+                fileUpload(fileUrl, uploadUrl, "scenes", "scene", fileUrl.lastPathComponent)
+                }
+            }
+            else {print("scenes folder does not exists")}
+
+            if dirExists(mapsFolder!.path){
+                let fileURLs = try fm.contentsOfDirectory(at: mapsFolder!, includingPropertiesForKeys: nil)
+
+                for fileUrl in fileURLs{
+                    fileUpload(fileUrl, uploadUrl, "maps", "application/json", fileUrl.lastPathComponent)
+                }
+            }
+            else {print("maps folder does not exists")}
+
+        } catch {
+            print("Error while enumerating files: \(error.localizedDescription)")
+        }
     }
     
-//    func AFuploader(_ zipfileURL: URL,_ sessionUrl: URL){
-//        AF.upload(
-//            multipartFormData: { multipartFormData in
-//                multipartFormData.append(zipfileURL, withName: "file")
-//        },
-//            to: sessionUrl, method: .post
-//            ).responseString { response in
-//                debugPrint(response)
-//        }
-//    }
-    
+    func fileUpload(_ uploadFile: URL, _ uploadUrl: URL, _ subfolder: String, _ contentType: String,_ filename: String){
+        var request = URLRequest(url: uploadUrl)
+        request.httpMethod = "POST"
+        request.setValue(subfolder, forHTTPHeaderField: "X-Session-Subfolder")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue(filename, forHTTPHeaderField: "X-Filename")
+        let config = URLSessionConfiguration.background(withIdentifier: UUID().uuidString)
+        let session = URLSession(configuration: config)
+        print(request)
+        
+        let task = session.uploadTask(with: request, fromFile: uploadFile)
+        task.resume()
+    }
+
     func isLargeFile(_ zipfileURL: URL) -> Bool{
         // if a file is larger than 100mb this function will return true
-        
         let fileSize = zipfileURL.fileSize;
-        
         if (fileSize >= 104857600){
             return true
         }
         else{
             return false
         }
-        
+    }
+    
+    func dirExists(_ fullPath: String) -> Bool{
+        // https://stackoverflow.com/a/24696209
+        let fileManager = FileManager.default
+        var isDir : ObjCBool = false
+        if fileManager.fileExists(atPath: fullPath, isDirectory:&isDir) {
+            if isDir.boolValue {
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
     }
     
     
 //    network helper functions
 //    https://github.com/rwbutler/Connectivity
-
+    
+    
     func isWifi() -> Bool {
         let connectivity = Connectivity()
         return (connectivity.isConnectedViaWiFi || connectivity.isConnectedViaWiFiWithoutInternet)
     }
-    
+
     func isCellular() -> Bool{
         let connectivity = Connectivity()
         return (connectivity.isConnectedViaCellular || connectivity.isConnectedViaCellularWithoutInternet)
     }
-    
+
     func isConnection() -> Bool{
         return (isWifi() || isCellular())
     }
+
+    //    TODO: move to a native framework for connectivity
+//    func isConnection() -> Bool{
+//        if Reachability.isConnectedToNetwork(){
+//            return true;
+//        } else {
+//            return false
+//        }
+//    }
 }
 
 
@@ -165,4 +216,41 @@ extension URL {
     }
 }
 
+//    TODO: move to a native framework for connectivity
+//public class Reachability {
+//    // https://stackoverflow.com/a/39782859
+//
+//    class func isConnectedToNetwork() -> Bool {
+//
+//        var zeroAddress = sockaddr_in(sin_len: 0, sin_family: 0, sin_port: 0, sin_addr: in_addr(s_addr: 0), sin_zero: (0, 0, 0, 0, 0, 0, 0, 0))
+//        zeroAddress.sin_len = UInt8(MemoryLayout.size(ofValue: zeroAddress))
+//        zeroAddress.sin_family = sa_family_t(AF_INET)
+//
+//        let defaultRouteReachability = withUnsafePointer(to: &zeroAddress) {
+//            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {zeroSockAddress in
+//                SCNetworkReachabilityCreateWithAddress(nil, zeroSockAddress)
+//            }
+//        }
+//
+//        var flags: SCNetworkReachabilityFlags = SCNetworkReachabilityFlags(rawValue: 0)
+//        if SCNetworkReachabilityGetFlags(defaultRouteReachability!, &flags) == false {
+//            return false
+//        }
+//
+//        /* Only Working for WIFI
+//         let isReachable = flags == .reachable
+//         let needsConnection = flags == .connectionRequired
+//
+//         return isReachable && !needsConnection
+//         */
+//
+//        // Working for Cellular and WIFI
+//        let isReachable = (flags.rawValue & UInt32(kSCNetworkFlagsReachable)) != 0
+//        let needsConnection = (flags.rawValue & UInt32(kSCNetworkFlagsConnectionRequired)) != 0
+//        let ret = (isReachable && !needsConnection)
+//
+//        return ret
+//
+//    }
+//}
 #endif
