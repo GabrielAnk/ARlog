@@ -10,8 +10,6 @@
 
 import Foundation               // includes URLSession
 import SystemConfiguration
-import ZIPFoundation
-import Connectivity             // needed to detect if wifi or cellular connection
 
 public class ARlogUpload{
 
@@ -26,7 +24,7 @@ public class ARlogUpload{
     // upload functionality
     func upload(_ sessionFilesUrl: String,_ sessionName: String){
         var dynUpload = doUpload
-                
+        
         if (isWifi() == true && onlyWifi == true){
             dynUpload = true
         }
@@ -40,34 +38,15 @@ public class ARlogUpload{
             dynUpload = false
         }
         
-        if (doUpload == true && dynUpload == true && isConnection() == true){
+        if (isConnection() == false){
+            dynUpload = false
+            print("there is no connection to any network")
+        }
         
+        if (doUpload == true && dynUpload == true){
+            
             let uploadUrl = URL(string: serverURL + "/log/" + projectID + "/" + sessionName)
-        
-            let filePathString = sessionFilesUrl + sessionName + ".zip"
-            let zipfileURL = URL(string: filePathString)
-        
-            let zipPath = URL(string: sessionFilesUrl)
-            let filemngr = FileManager()
-        
-            do {
-                try filemngr.zipItem(at: zipPath!, to:zipfileURL!)
-            } catch {
-                print("Creation of ZIP archive failed with error:\(error)")
-            }
-        
-            if (isLargeFile(zipfileURL!) == false){
-                singleFileUploader(sessionFilesUrl, uploadUrl!)
-            }
-            else if (largeOnlyWifi == false){
-                singleFileUploader(sessionFilesUrl, uploadUrl!)
-            }
-            else if (isLargeFile(zipfileURL!) == true && largeOnlyWifi == true && isWifi() == true){
-                singleFileUploader(sessionFilesUrl, uploadUrl!)
-            }
-            else{
-                print("file is too large with no wifi ")
-            }
+            singleFileUploader(sessionFilesUrl, uploadUrl!)
             
         }
         else if (doUpload == false){
@@ -91,8 +70,11 @@ public class ARlogUpload{
         
         // upload the session files in the session directory
         fileUpload(sessionJsonFile!, uploadUrl, "session", "application/json", "session.json")
-        fileUpload(videoFile!, uploadUrl, "session", "video/mp4", "video.mp4")
-
+        if (!(isLargeFile(videoFile!))){
+            fileUpload(videoFile!, uploadUrl, "session", "video/mp4", "screen.mp4")
+        } else{
+            print("video file too large for upload")
+        }
         
         // loop through the folders of the session directory to upload each file
         // https://stackoverflow.com/a/47761434
@@ -129,15 +111,15 @@ public class ARlogUpload{
         request.setValue(filename, forHTTPHeaderField: "X-Filename")
         let config = URLSessionConfiguration.background(withIdentifier: UUID().uuidString)
         let session = URLSession(configuration: config)
-        print(request)
+//        print(request)
         
         let task = session.uploadTask(with: request, fromFile: uploadFile)
         task.resume()
     }
 
-    func isLargeFile(_ zipfileURL: URL) -> Bool{
+    func isLargeFile(_ fileUrl: URL) -> Bool{
         // if a file is larger than 100mb this function will return true
-        let fileSize = zipfileURL.fileSize;
+        let fileSize = fileUrl.fileSize;
         if (fileSize >= 104857600){
             return true
         }
@@ -161,33 +143,17 @@ public class ARlogUpload{
         }
     }
     
-    
-//    network helper functions
-//    https://github.com/rwbutler/Connectivity
-    
-    
     func isWifi() -> Bool {
-        let connectivity = Connectivity()
-        return (connectivity.isConnectedViaWiFi || connectivity.isConnectedViaWiFiWithoutInternet)
+        return Reachability.isConnectedToWifi()
     }
 
     func isCellular() -> Bool{
-        let connectivity = Connectivity()
-        return (connectivity.isConnectedViaCellular || connectivity.isConnectedViaCellularWithoutInternet)
+        return (Reachability.isConnectedToNetwork() && !(Reachability.isConnectedToWifi()))
     }
 
     func isConnection() -> Bool{
-        return (isWifi() || isCellular())
+        return (Reachability.isConnectedToWifi() || Reachability.isConnectedToNetwork())
     }
-
-    //    TODO: move to a native framework for connectivity
-//    func isConnection() -> Bool{
-//        if Reachability.isConnectedToNetwork(){
-//            return true;
-//        } else {
-//            return false
-//        }
-//    }
 }
 
 
@@ -216,41 +182,64 @@ extension URL {
     }
 }
 
-//    TODO: move to a native framework for connectivity
-//public class Reachability {
-//    // https://stackoverflow.com/a/39782859
-//
-//    class func isConnectedToNetwork() -> Bool {
-//
-//        var zeroAddress = sockaddr_in(sin_len: 0, sin_family: 0, sin_port: 0, sin_addr: in_addr(s_addr: 0), sin_zero: (0, 0, 0, 0, 0, 0, 0, 0))
-//        zeroAddress.sin_len = UInt8(MemoryLayout.size(ofValue: zeroAddress))
-//        zeroAddress.sin_family = sa_family_t(AF_INET)
-//
-//        let defaultRouteReachability = withUnsafePointer(to: &zeroAddress) {
-//            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {zeroSockAddress in
-//                SCNetworkReachabilityCreateWithAddress(nil, zeroSockAddress)
-//            }
-//        }
-//
-//        var flags: SCNetworkReachabilityFlags = SCNetworkReachabilityFlags(rawValue: 0)
-//        if SCNetworkReachabilityGetFlags(defaultRouteReachability!, &flags) == false {
-//            return false
-//        }
-//
-//        /* Only Working for WIFI
-//         let isReachable = flags == .reachable
-//         let needsConnection = flags == .connectionRequired
-//
-//         return isReachable && !needsConnection
-//         */
-//
-//        // Working for Cellular and WIFI
-//        let isReachable = (flags.rawValue & UInt32(kSCNetworkFlagsReachable)) != 0
-//        let needsConnection = (flags.rawValue & UInt32(kSCNetworkFlagsConnectionRequired)) != 0
-//        let ret = (isReachable && !needsConnection)
-//
-//        return ret
-//
-//    }
-//}
+
+public class Reachability {
+    // https://stackoverflow.com/a/39782859
+
+    class func isConnectedToNetwork() -> Bool {
+
+        var zeroAddress = sockaddr_in(sin_len: 0, sin_family: 0, sin_port: 0, sin_addr: in_addr(s_addr: 0), sin_zero: (0, 0, 0, 0, 0, 0, 0, 0))
+        zeroAddress.sin_len = UInt8(MemoryLayout.size(ofValue: zeroAddress))
+        zeroAddress.sin_family = sa_family_t(AF_INET)
+
+        let defaultRouteReachability = withUnsafePointer(to: &zeroAddress) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {zeroSockAddress in
+                SCNetworkReachabilityCreateWithAddress(nil, zeroSockAddress)
+            }
+        }
+
+        var flags: SCNetworkReachabilityFlags = SCNetworkReachabilityFlags(rawValue: 0)
+        if SCNetworkReachabilityGetFlags(defaultRouteReachability!, &flags) == false {
+            return false
+        }
+
+        /* Only Working for WIFI
+         let isReachable = flags == .reachable
+         let needsConnection = flags == .connectionRequired
+
+         return isReachable && !needsConnection
+         */
+
+        // Working for Cellular and WIFI
+        let isReachable = (flags.rawValue & UInt32(kSCNetworkFlagsReachable)) != 0
+        let needsConnection = (flags.rawValue & UInt32(kSCNetworkFlagsConnectionRequired)) != 0
+        let ret = (isReachable && !needsConnection)
+
+        return ret
+    }
+    
+    class func isConnectedToWifi() -> Bool{
+        var zeroAddress = sockaddr_in(sin_len: 0, sin_family: 0, sin_port: 0, sin_addr: in_addr(s_addr: 0), sin_zero: (0, 0, 0, 0, 0, 0, 0, 0))
+        zeroAddress.sin_len = UInt8(MemoryLayout.size(ofValue: zeroAddress))
+        zeroAddress.sin_family = sa_family_t(AF_INET)
+        
+        let defaultRouteReachability = withUnsafePointer(to: &zeroAddress) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {zeroSockAddress in
+                SCNetworkReachabilityCreateWithAddress(nil, zeroSockAddress)
+            }
+        }
+        
+        var flags: SCNetworkReachabilityFlags = SCNetworkReachabilityFlags(rawValue: 0)
+        if SCNetworkReachabilityGetFlags(defaultRouteReachability!, &flags) == false {
+            return false
+        }
+        
+        /* Only Working for WIFI */
+        let isReachable = flags == .reachable
+        let needsConnection = flags == .connectionRequired
+        let ret = (isReachable && !needsConnection)
+        
+        return ret;
+    }
+}
 #endif
